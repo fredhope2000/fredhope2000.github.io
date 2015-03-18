@@ -1,0 +1,84 @@
+---
+title: "Predicting Exercise Manner from Motion Data"
+author: "Fred Hope"
+date: "March 18, 2015"
+output: html_document
+---
+
+##Abstract
+
+For this analysis, our goal was to use machine learning algorithms to predict the manner in which test subjects performed an exercise, based on data from accelerometers. Our models are based on the training data found at <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>, and use modelling functions found in the caret package.
+
+The best model that we examined was a random forests model, whose accuracy was initially estimated by 5-fold cross-validation, then verified by using the model to predict exercise manner for a separate testing set.
+
+##Loading and Cleaning the Data
+
+First we load the data from the original CSV file. We will also move 25% of the data into a test set that we can use to estimate the accuracy of our model.
+
+```{r results='hide'}
+library(caret)
+
+set.seed(1000)
+
+originalTrainingData <- read.csv("pml-training.csv")
+inTrain <- createDataPartition(y=originalTrainingData$classe,p=.75,list=F)
+training <- originalTrainingData[inTrain,]
+testing <- originalTrainingData[-inTrain,]
+```
+
+Next, check for columns in the training set that have missing values. The columns that did have missing values were missing almost all of the values, so we decided to simply remove any columns with missing values. We also removed the first (index) column. We need to remove the same columns from the test set so that our model will work properly later when it is applied to the test set.
+
+```{r}
+NAs <- apply(training,2,function(x) sum(is.na(x)))
+NAcolumns <- which(NAs>0)
+
+training <- training[,-NAcolumns]
+training <- training[,-1]
+
+testing <- testing[,-NAcolumns]
+testing <- testing[,-1]
+```
+
+We noticed that there are still some columns with blank values. These columns all have names starting with "kurtosis", "skewness", "min", "max", or "amplitude_yaw", so we can use grep to identify all such columns, as well as columns containing timestamps, which are not relevant to the analysis. Again, we must apply the same changes to the test set as we do to the training set.
+
+```{r}
+emptyColumns <- c(grep("^kurtosis",names(training)),grep("^skewness",names(training)))
+emptyColumns <- c(emptyColumns,grep("^min_",names(training)),grep("^max_",names(training)))
+emptyColumns <- c(emptyColumns,grep("^amplitude_yaw",names(training)))
+emptyColumns <- c(emptyColumns,grep("timestamp",names(training)))
+emptyColumns <- sort(emptyColumns)
+
+training <- training[,-emptyColumns]
+testing <- testing[,-emptyColumns]
+```
+
+Now we will create our first model. We will use the "rpart" training method, which uses regression & classification trees, with 5-fold cross-validation.
+
+```{r cache=TRUE,results='hide'}
+rpartModel <- train(classe~.,data=training,trControl=trainControl(method="cv",number=5),method="rpart")
+```
+```{r}
+rpartModel
+```
+
+As we can see, the accuracy is not great. We will now try a random forest model.
+
+```{r cache=TRUE,results='hide'}
+randomForestModel <- train(classe~.,data=training,trControl=trainControl(method="cv",number=5),method="rf")
+```
+```{r}
+randomForestModel
+```
+
+Much better! However, even though cross-validation was used, it is safer to now test this model on a separate set--the testing set we created earlier--in order to properly estimate the out-of-sample error.
+
+```{r}
+prediction <- predict(randomForestModel,testing)
+results <- table(prediction,testing$classe)
+results
+errors <- sum(results[row(results)!=col(results)])
+totalcases <- sum(results)
+1 - (errors / totalcases)
+```
+
+Thus, we are very satisfied with our model, and we estimate its out-of-sample error to be 99.84%.
